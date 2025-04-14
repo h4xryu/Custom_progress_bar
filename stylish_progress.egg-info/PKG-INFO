@@ -1,0 +1,17 @@
+Metadata-Version: 2.1
+Name: stylish-progress
+Version: 0.1.0
+Summary: A stylish progress bar library with beautiful visual interface
+Home-page: UNKNOWN
+Author: RyuHa Kim
+Author-email: rhk04@yonsei.ac.kr
+License: MIT
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+License-File: LICENSE
+
+UNKNOWN
+
