@@ -4,12 +4,61 @@ A stylish progress bar library that provides a beautiful visual interface simila
 
 ## Installation
 
+### Method 1: Direct Import (Recommended)
+Simply clone the repository and import directly from the cloned directory:
+
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/stylish-progress.git
 
-# Add the directory to your Python path
-export PYTHONPATH=$PYTHONPATH:/path/to/stylish-progress
+# Move to your project directory
+cd your-project-directory
+
+# Copy the stylish_progress directory to your project
+cp -r ../stylish-progress/stylish_progress ./
+```
+
+Then in your Python code:
+```python
+from stylish_progress import Bar
+```
+
+### Method 2: Python Path
+Add the directory to your Python path:
+
+#### Linux/macOS
+```bash
+# Temporary (current terminal session only)
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+
+# Permanent (add to ~/.bashrc or ~/.zshrc)
+echo 'export PYTHONPATH=$PYTHONPATH:$(pwd)' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### Windows
+```cmd
+# Temporary (current terminal session only)
+set PYTHONPATH=%PYTHONPATH%;%CD%
+
+# Permanent (System Properties > Environment Variables)
+# Add new System Variable:
+# Variable name: PYTHONPATH
+# Variable value: %CD%
+```
+
+### Method 3: Virtual Environment
+Create a virtual environment and install the package:
+
+```bash
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+# or
+.\venv\Scripts\activate  # Windows
+
+# Copy the package to site-packages
+cp -r ../stylish-progress/stylish_progress venv/lib/python3.x/site-packages/
 ```
 
 ## Usage
@@ -55,7 +104,3 @@ for epoch in range(num_epochs):
 - Color output support
 - ETA (Estimated Time of Arrival) display
 - Compact mode support
-
-## License
-
-MIT License 
