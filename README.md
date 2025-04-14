@@ -9,7 +9,7 @@ Simply clone the repository and import directly from the cloned directory:
 
 ```bash
 # Clone the repository
-git clone https://github.com/h4xryu/Custom-progress-bar.git
+git clone https://github.com/h4xryu/Custom_progress_bar.git
 
 # Move to your project directory
 cd your-project-directory
@@ -20,7 +20,7 @@ cp -r ../stylish-progress/stylish_progress ./
 
 Then in your Python code:
 ```python
-from stylish_progress import Bar
+from Custom_progress_bar.stylish_progress import Bar
 ```
 
 ### Method 2: Python Path
