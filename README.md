@@ -9,7 +9,7 @@ Simply clone the repository and import directly from the cloned directory:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/stylish-progress.git
+git clone https://github.com/h4xryu/stylish-progress.git
 
 # Move to your project directory
 cd your-project-directory
