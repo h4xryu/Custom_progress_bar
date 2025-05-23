@@ -4,42 +4,60 @@ import os
 import torch
 import sys
 
-# ANSI color codes for terminal output
+
 class Colors:
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    ENDC = '\033[0m'
+    """ANSI color codes for terminal output"""
+    BLACK = '\033[30m'
+    RED = '\033[31m'
+    GREEN = '\033[32m'
+    YELLOW = '\033[33m'
+    BLUE = '\033[34m'
+    MAGENTA = '\033[35m'
+    CYAN = '\033[36m'
+    WHITE = '\033[37m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+    ENDC = '\033[0m'  # End color
+    
+    # Bright colors
+    BRIGHT_RED = '\033[91m'
+    BRIGHT_GREEN = '\033[92m'
+    BRIGHT_YELLOW = '\033[93m'
+    BRIGHT_CYAN = '\033[96m'
+
+class ProgressBarStatus:
+    """Status constants for progress bar"""
+    TRAINING = "training"
+    COMPLETED = "completed" 
+    INTERRUPTED = "interrupted"
 
 class Bar(object):
-    def __init__(self, iterable, desc="Progress", total=None, color=Colors.CYAN):
-        self.iterable = iterable
-        self.iterator = iter(iterable)
-        self.desc = desc
-        self.color = color
-        self.last_loss = None
-        self.compact = True
-        self._DISPLAY_LENGTH = 40
+    def __init__(self, dataloader, desc="Training", color=Colors.CYAN):
+        if not hasattr(dataloader, 'dataset'):
+            raise ValueError('Attribute `dataset` not exists in dataloader.')
+        if not hasattr(dataloader, 'batch_size'):
+            raise ValueError('Attribute `batch_size` not exists in dataloader.')
         
-        # total이 None인 경우 iterable의 길이를 사용
-        if total is None:
-            if hasattr(iterable, '__len__'):
-                self.total = len(iterable)
-            else:
-                raise ValueError("iterable에 __len__ 메서드가 없거나 total을 명시적으로 지정해야 합니다.")
-        else:
-            self.total = total
-            
+        self.dataloader = dataloader
+        self.iterator = iter(dataloader)
+        self.dataset = dataloader.dataset
+        self.batch_size = dataloader.batch_size
         self._idx = 0
+        self._batch_idx = 0
         self._time = []
-    
+        self._DISPLAY_LENGTH = 40  # Wider bar for better visualization
+        self.desc = desc
+        self.default_color = color
+        self.last_loss = None
+        self.compact = True  # Enable compact mode
+        
+        # Status tracking
+        self.status = ProgressBarStatus.TRAINING
+        self._completed_naturally = False
+        self._start_time = time.time()
+        
     def __len__(self):
-        return self.total
+        return len(self.dataloader)
     
     def __iter__(self):
         return self
@@ -48,159 +66,215 @@ class Bar(object):
         if len(self._time) < 2:
             self._time.append(time.time())
         
+        self._batch_idx += self.batch_size
+        if self._batch_idx > len(self.dataset):
+            self._batch_idx = len(self.dataset)
+        
         try:
-            item = next(self.iterator)
+            batch = next(self.iterator)
             self._display()
         except StopIteration:
+            # Natural completion
+            self._completed_naturally = True
+            self.status = ProgressBarStatus.COMPLETED
+            self._display_final()
             raise StopIteration()
+        except KeyboardInterrupt:
+            # Manual interruption
+            self.status = ProgressBarStatus.INTERRUPTED
+            self._display_final()
+            raise KeyboardInterrupt()
+        except Exception as e:
+            # Other exceptions
+            self.status = ProgressBarStatus.INTERRUPTED
+            self._display_final()
+            raise e
         
         self._idx += 1
-        if self._idx >= self.total:
+        if self._idx >= len(self.dataloader):
+            self._completed_naturally = True
+            self.status = ProgressBarStatus.COMPLETED
             self._reset()
         
-        return item
+        return batch
     
     def update_loss(self, loss_value):
         """Update current loss to display in the progress bar"""
         self.last_loss = loss_value
     
+    def mark_completed(self):
+        """Manually mark as completed (for successful finish)"""
+        self.status = ProgressBarStatus.COMPLETED
+        self._completed_naturally = True
+        self._display_final()
+    
+    def mark_interrupted(self):
+        """Manually mark as interrupted (for error/cancellation)"""
+        self.status = ProgressBarStatus.INTERRUPTED
+        self._display_final()
+    
+    def _get_status_colors(self):
+        """Get colors based on current status"""
+        if self.status == ProgressBarStatus.TRAINING:
+            return {
+                'bar_color': Colors.CYAN,
+                'desc_color': Colors.BOLD + Colors.CYAN,
+                'time_color': Colors.GREEN,
+                'stats_color': Colors.BOLD
+            }
+        elif self.status == ProgressBarStatus.COMPLETED:
+            return {
+                'bar_color': Colors.BRIGHT_GREEN,
+                'desc_color': Colors.BOLD + Colors.BRIGHT_GREEN,
+                'time_color': Colors.BRIGHT_GREEN,
+                'stats_color': Colors.BOLD + Colors.BRIGHT_GREEN
+            }
+        elif self.status == ProgressBarStatus.INTERRUPTED:
+            return {
+                'bar_color': Colors.BRIGHT_RED,
+                'desc_color': Colors.BOLD + Colors.BRIGHT_RED,
+                'time_color': Colors.BRIGHT_RED,
+                'stats_color': Colors.BOLD + Colors.BRIGHT_RED
+            }
+        else:
+            return {
+                'bar_color': self.default_color,
+                'desc_color': Colors.BOLD,
+                'time_color': Colors.GREEN,
+                'stats_color': Colors.BOLD
+            }
+    
     def _display(self):
         if len(self._time) > 1:
             t = (self._time[-1] - self._time[-2])
-            eta = t * (self.total - self._idx)
+            eta = t * (len(self.dataloader) - self._idx)
         else:
             eta = 0
         
-        rate = self._idx / self.total
+        rate = self._idx / len(self.dataloader)
         percentage = int(rate * 100)
         len_bar = int(rate * self._DISPLAY_LENGTH)
         
-        bar_fill = '━' * len_bar
-        bar_empty = '╌' * (self._DISPLAY_LENGTH - len_bar)
+        # Get status-based colors
+        colors = self._get_status_colors()
         
-        idx = str(self._idx).rjust(len(str(self.total)), ' ')
+        # Use thinner characters for a more compact display
+        bar_fill = '━' * len_bar  # Horizontal line instead of block
+        bar_empty = '╌' * (self._DISPLAY_LENGTH - len_bar)  # Dotted line instead of block
         
-        prefix = f"{Colors.BOLD}{self.desc}{Colors.ENDC}"
-        progress = f"{self.color}{bar_fill}{bar_empty}{Colors.ENDC}"
-        stats = f"{Colors.BOLD}{percentage:3d}%{Colors.ENDC}"
+        idx = str(self._batch_idx).rjust(len(str(len(self.dataset))), ' ')
         
+        # Format with status-based colors
+        prefix = f"{colors['desc_color']}{self.desc}{Colors.ENDC}"
+        progress = f"{colors['bar_color']}{bar_fill}{bar_empty}{Colors.ENDC}"
+        stats = f"{colors['stats_color']}{percentage:3d}%{Colors.ENDC}"
+        
+        # Add loss display if available
         loss_display = ""
         if self.last_loss is not None:
-            loss_display = f" {Colors.GREEN}loss:{self.last_loss:.4f}{Colors.ENDC}"
-            
+            loss_display = f" {Colors.YELLOW}loss:{self.last_loss:.4f}{Colors.ENDC}"
+        
+        # Time display with green color
+        time_display = f"{colors['time_color']}{eta:.1f}s{Colors.ENDC}"
+        
+        # Compact display in a single line
         if self.compact:
-            tmpl = f"\r{prefix} {stats} {idx}/{self.total} [{progress}] {Colors.YELLOW}{eta:.1f}s{Colors.ENDC}{loss_display}"
+            tmpl = f"\r{prefix} {stats} {idx}/{len(self.dataset)} [{progress}] {time_display}{loss_display}"
         else:
-            time_info = f"ETA: {Colors.YELLOW}{eta:.1f}s{Colors.ENDC}"
-            tmpl = f"\r{prefix}: |{progress}| {stats} {idx}/{self.total} {time_info}{loss_display}"
+            # Original multi-component display
+            time_info = f"ETA: {time_display}"
+            tmpl = f"\r{prefix}: |{progress}| {stats} {idx}/{len(self.dataset)} {time_info}{loss_display}"
         
         sys.stdout.write(tmpl)
         sys.stdout.flush()
         
-        if self._idx == self.total:
-            print()
+        # Don't print newline here - let _display_final handle it
+    
+    def _display_final(self):
+        """Display final status with appropriate colors"""
+        total_time = time.time() - self._start_time
+        colors = self._get_status_colors()
+        
+        # Calculate final percentage
+        if self.status == ProgressBarStatus.COMPLETED:
+            percentage = 100
+            len_bar = self._DISPLAY_LENGTH
+            status_text = "COMPLETED"
+            status_icon = "✓"
+        else:
+            rate = self._idx / len(self.dataloader)
+            percentage = int(rate * 100)
+            len_bar = int(rate * self._DISPLAY_LENGTH)
+            status_text = "INTERRUPTED"
+            status_icon = "✗"
+        
+        # Create final progress bar
+        bar_fill = '━' * len_bar
+        bar_empty = '╌' * (self._DISPLAY_LENGTH - len_bar)
+        
+        idx = str(self._batch_idx).rjust(len(str(len(self.dataset))), ' ')
+        
+        # Format final display
+        prefix = f"{colors['desc_color']}{self.desc}{Colors.ENDC}"
+        progress = f"{colors['bar_color']}{bar_fill}{bar_empty}{Colors.ENDC}"
+        stats = f"{colors['stats_color']}{percentage:3d}%{Colors.ENDC}"
+        
+        # Add loss display if available
+        loss_display = ""
+        if self.last_loss is not None:
+            loss_display = f" {Colors.YELLOW}loss:{self.last_loss:.4f}{Colors.ENDC}"
+        
+        # Final time display
+        time_display = f"{colors['time_color']}{total_time:.1f}s{Colors.ENDC}"
+        status_display = f"{colors['desc_color']}{status_icon} {status_text}{Colors.ENDC}"
+        
+        # Final display line
+        if self.compact:
+            tmpl = f"\r{prefix} {stats} {idx}/{len(self.dataset)} [{progress}] {time_display}{loss_display} {status_display}"
+        else:
+            tmpl = f"\r{prefix}: |{progress}| {stats} {idx}/{len(self.dataset)} Total: {time_display}{loss_display} {status_display}"
+        
+        sys.stdout.write(tmpl)
+        sys.stdout.flush()
+        print()  # Add newline after final display
     
     def _reset(self):
         self._idx = 0
+        self._batch_idx = 0
         self._time = []
 
-# Enhanced writer class that extends SummaryWriter to log training/validation metrics
-class Writer(SummaryWriter):
-    def __init__(self, logdir):
-        super(Writer, self).__init__(logdir)
-        self.epoch = 0
-        self.best_metric = float('inf')
+# Enhanced Bar for training with context manager support
+class TrainingBar(Bar):
+    """Enhanced Bar with context manager support for training loops"""
     
-    def log_train_loss(self, loss_type, train_loss, step):
-        """Log training loss with colorful output"""
-        self.add_scalar(f'train_{loss_type}_loss', train_loss, step)
-        print(f"{Colors.BOLD}Train {loss_type} Loss:{Colors.ENDC} {Colors.GREEN}{train_loss:.6f}{Colors.ENDC}")
+    def __init__(self, dataloader, desc="Training", color=Colors.CYAN):
+        super().__init__(dataloader, desc, color)
+        self.epoch = 1
+        self.total_epochs = None
     
-    def log_valid_loss(self, loss_type, valid_loss, step):
-        """Log validation loss with colorful output"""
-        self.add_scalar(f'valid_{loss_type}_loss', valid_loss, step)
-        print(f"{Colors.BOLD}Valid {loss_type} Loss:{Colors.ENDC} {Colors.BLUE}{valid_loss:.6f}{Colors.ENDC}")
+    def set_epoch_info(self, current_epoch, total_epochs):
+        """Set epoch information for display"""
+        self.epoch = current_epoch
+        self.total_epochs = total_epochs
+        if total_epochs:
+            self.desc = f"Epoch {current_epoch}/{total_epochs}"
+        else:
+            self.desc = f"Epoch {current_epoch}"
     
-    def log_score(self, metrics_name, metrics, step):
-        """Log metrics with colorful output"""
-        self.add_scalar(metrics_name, metrics, step)
-        print(f"{Colors.BOLD}{metrics_name}:{Colors.ENDC} {Colors.CYAN}{metrics:.6f}{Colors.ENDC}")
-        
-        # Track best metrics for saving checkpoints
-        if metrics_name == 'validation_loss' and metrics < self.best_metric:
-            self.best_metric = metrics
-            return True
-        return False
-
-def save_checkpoint(exp_log_dir, model, epoch, optimizer=None, is_best=False):
-    """Enhanced checkpoint saving with colored output"""
-    save_dict = {
-        "model": model.state_dict(),
-        "epoch": epoch
-    }
+    def __enter__(self):
+        """Context manager entry"""
+        return self
     
-    if optimizer is not None:
-        save_dict["optimizer"] = optimizer.state_dict()
-    
-    save_path = os.path.join(exp_log_dir, "ckpt_latest.pt")
-    torch.save(save_dict, save_path)
-    
-    if is_best:
-        best_path = os.path.join(exp_log_dir, "ckpt_best.pt")
-        torch.save(save_dict, best_path)
-        print(f"{Colors.BOLD}{Colors.GREEN}✓ Saved new best model checkpoint!{Colors.ENDC}")
-    else:
-        print(f"{Colors.YELLOW}→ Saved checkpoint at epoch {epoch}{Colors.ENDC}")
-
-# Example usage:
-# 
-# # Training loop
-# writer = EnhancedWriter('./logs/experiment1')
-# train_bar = StylishBar(train_loader, desc="Train")  # Shorter description for compact display
-# 
-# for epoch in range(num_epochs):
-#     print(f"{Colors.HEADER}{Colors.BOLD}Epoch {epoch+1}/{num_epochs}{Colors.ENDC}")
-#     
-#     # Training phase
-#     model.train()
-#     total_loss = 0
-#     
-#     for batch in train_bar:
-#         inputs, targets = batch
-#         
-#         # Forward pass
-#         outputs = model(inputs)
-#         loss = criterion(outputs, targets)
-#         
-#         # Update progress bar with current loss
-#         train_bar.update_loss(loss.item())
-#         
-#         # Backward and optimize
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-#         
-#         total_loss += loss.item()
-#     
-#     # Log training metrics
-#     avg_loss = total_loss / len(train_loader)
-#     writer.log_train_loss('total', avg_loss, epoch)
-#     
-#     # Validation phase with a different color
-#     valid_bar = StylishBar(valid_loader, desc="Valid", color=Colors.BLUE)  # Shorter description
-#     model.eval()
-#     valid_loss = 0
-#     
-#     with torch.no_grad():
-#         for batch in valid_bar:
-#             inputs, targets = batch
-#             outputs = model(inputs)
-#             loss = criterion(outputs, targets)
-#             valid_bar.update_loss(loss.item())
-#             valid_loss += loss.item()
-#     
-#     avg_val_loss = valid_loss / len(valid_loader)
-#     is_best = writer.log_valid_loss('total', avg_val_loss, epoch)
-#     
-#     # Save checkpoint
-#     save_checkpoint('./checkpoints', model, epoch, optimizer, is_best)
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - handle different exit scenarios"""
+        if exc_type is None:
+            # Normal completion
+            self.mark_completed()
+        elif exc_type == KeyboardInterrupt:
+            # Manual interruption
+            self.mark_interrupted()
+            return False  # Re-raise the exception
+        else:
+            # Other exceptions
+            self.mark_interrupted()
+            return False  # Re-raise the exception
